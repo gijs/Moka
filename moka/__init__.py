@@ -1,5 +1,8 @@
+from __future__ import print_function
+
 import unittest
 
+prn = print
 
 class List(list):
     """
@@ -54,12 +57,6 @@ class List(list):
             f = lambda x: not not x
 
         return self.keep(f)
-
-    def prn(self, f=None):
-        if f:
-            print f(self)
-        else:
-            print self
 
     def map(self, f):
         return List(f(x) if hasattr(f, '__call__') else f
