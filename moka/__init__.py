@@ -1,8 +1,5 @@
-from __future__ import print_function
-
 import unittest
 
-prn = print
 
 class List(list):
     """
@@ -314,18 +311,14 @@ class Dict(dict):
     all
     count () = len, (x|f)
     empty () == [], (f) -> x in [0, None]..
+    Do do(lambda seq: ...)
+    invoke
 
-    wrapper: clear(), clone(), fromkeys()
+    wrapper: clear(), fromkeys()
        (and last_value = the result of the last operation)
        also do will pass extra arg. so do(self.assertTrue, ...)
        = do(lambda seq: self.assertTrue(seq, ...)
        = self.assertTrue(seq, ...)
-
-    # todo
-    init()
-    invoke
-    Uniq -> Can take f to specify on what it should uniq.
-    Do do(lambda seq: ...)
     """
 
     @staticmethod
