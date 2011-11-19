@@ -1,12 +1,12 @@
 import unittest
 import string
+import operator as op
 
-# todo
-# Make map(attr=sup)
-#        map(item=meh)
 
 class Blank:
     pass
+
+_ = Blank
 
 
 class List(list):
@@ -43,7 +43,6 @@ class List(list):
         self._moka_save = False
         list.__init__(self, *args, **kwargs)
 
-
     @staticmethod
     def _proxy(method_name):
         def wrap(self, *args, **kwargs):
@@ -56,29 +55,26 @@ class List(list):
     def _f(self, *args, **kwargs):
         args = list(args)
 
-        if 'eq' in kwargs:
-            return lambda x: x == kwargs['eq']
-        elif 'in_' in kwargs:
-            return lambda x: x in kwargs['in_']
-        elif 'gt' in kwargs:
-            return lambda x: x > kwargs['gt']
-        elif 'ge' in kwargs:
-            return lambda x: x >= kwargs['ge']
-        elif 'lt' in kwargs:
-            return lambda x: x < kwargs['lt']
-        elif 'le' in kwargs:
-            return lambda x: x <= kwargs['le']
+        # shortcut to use operator module.
+        if kwargs:
+            k, v = kwargs.items()[0]
+            fn = getattr(op, k)
+            return lambda x: fn(x, v)
 
         f = args.pop(0)
 
         if Blank in args:
-            def tmp(x):
-                args[args.index(Blank)] = x
-                return f(*args, **kwargs)
-            return tmp
-
+            pos = args.index(Blank)
         else:
-            return lambda x: f(x, *args, **kwargs)
+            args.insert(0, None)
+            pos = 0
+
+        args = list(args)
+
+        def tmp(x):
+            args[pos] = x
+            return f(*args, **kwargs)
+        return tmp
 
     def saving(self, save=True):
         self._moka_save = save
@@ -210,6 +206,7 @@ class ListTest(unittest.TestCase):
     def test_keep(self):
         self.assertEqual(self.seq.keep(lambda x: x < 3), [1, 2])
         self.assertEqual(self.seq.keep(eq=3), [3])
+        self.assertEqual(self.seq.keep(op.eq, 3), [3])
 
     def test_rem(self):
         self.assertEqual(self.seq.rem(lambda x: x < 3), [3, 4, 5])
@@ -313,13 +310,21 @@ class ListTest(unittest.TestCase):
     def test_attr(self):
         self.assertEqual(self.seq.attr('real'), [1, 2, 3, 4, 5])
         self.assertEqual(self.seq.attr('imag'), [0, 0, 0, 0, 0])
+        self.assertEqual(self.seq.map(op.attrgetter('real')),
+                         [1, 2, 3, 4, 5])
 
     def test_item(self):
         self.assertEqual(List([dict(a=1), dict(a=2)]).item('a'), [1, 2])
+        (List([dict(a=1), dict(a=2)])
+           .map(op.itemgetter('a'))
+           .do(self.assertEqual, [1, 2]))
 
     def test_invoke(self):
         self.assertEqual(self.seq.invoke('__str__'),
                          ['1', '2', '3', '4', '5'])
+        (self.seq
+             .map(op.methodcaller('__str__'))
+             .do(self.assertEqual, ['1', '2', '3', '4', '5']))
 
     def test_uniq(self):
         self.assertEqual(List([2, 1, 2, 3, 2, 1, 2, 3]).uniq().sort(),
@@ -357,12 +362,12 @@ class ListTest(unittest.TestCase):
 
     def test_partial_blank(self):
         (List([3])
-          .map(string.zfill, '7', Blank)
+          .map(string.zfill, '7', _)
           .do(self.assertEqual, ['007']))
 
     def test_kw_in(self):
         (List([1, 2])
-          .keep(in_=[2, 3, 4])
+          .keep(op.contains, [2, 3, 4], _)
           .do(self.assertEqual, [2]))
 
     def test_kw_gt(self):
@@ -387,8 +392,9 @@ class ListTest(unittest.TestCase):
 
     def test_savelist(self):
         x = List(range(1, 5)).saving()
-        x.keep(eq=2)
-        self.assertEqual(x, [2])
+        x.keep(gt=2)
+        x.keep(lt=4)
+        self.assertEqual(x, [3])
 
 
 class Dict(dict):
@@ -420,66 +426,81 @@ class Dict(dict):
 
         setattr(Dict, method_name, wrap)
 
-    def _f(self, f, x, y):
-        if hasattr(f, '__call__'):
-            return f(x, y)
+    def _f(self, *args, **kwargs):
+        args = list(args)
+
+        # shortcut to use operator module.
+        if kwargs:
+            k, v = kwargs.items()[0]
+            fn = getattr(op, k)
+            return lambda _, y: fn(y, v)
+
+        f = args.pop(0)
+
+        # if Blank in args:
+        #     pos = args.index(Blank)
+        # else:
+        #     args.insert(0, None)
+        #     pos = 0
+
+        args.insert(0, None)
+        args.insert(0, None)
+        args = list(args)
+
+        def tmp(x, y):
+            args[0] = x
+            args[1] = y
+            return f(*args, **kwargs)
+
+        return tmp
+
+    def __init__(self, *args, **kwargs):
+        self._moka_save = False
+        dict.__init__(self, *args, **kwargs)
+
+    def _moka_assign(self, items):
+        if self._moka_save:
+            pass
         else:
-            return f == y
+            return Dict(items)
 
-    def map(self, f):
-        d = Dict()
+    def map(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+        return self._moka_assign(f(x, y) for x, y in self.items())
 
-        for k, v in self.iteritems():
-            if hasattr(f, '__call__'):
-                d[k] = f(k, v)
-            else:
-                d[k] = f
+    def keep(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+        return self._moka_assign((x, y) for x, y in self.items()
+                                        if f(x, y))
 
-        return d
+    def rem(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+        return self._moka_assign((x, y) for x, y in self.items()
+                                        if not f(x, y))
 
-    def keep(self, f):
-        d = Dict()
+    def all(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
 
-        for k, v in self.iteritems():
-            if self._f(f, k, v):
-                d[k] = v
-
-        return d
-
-    def rem(self, f):
-        d = Dict()
-
-        for k, v in self.iteritems():
-            if not self._f(f, k, v):
-                d[k] = v
-
-        return d
-
-    def compact(self, f=None):
-        if f:
-            return self.rem(f)
-        else:
-            return self.rem(lambda x, y: not y)
-
-    def all(self, f):
-        for x, y in self.iteritems():
-            if not self._f(f, x, y):
+        for x, y in self.items():
+            if not f(x, y):
                 return False
 
         return True
 
-    def some(self, f):
-        for x, y in self.iteritems():
-            if self._f(f, x, y):
+    def some(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+
+        for x, y in self.items():
+            if f(x, y):
                 return True
 
         return False
 
-    def count(self, *args):
-        if not args:
+    def count(self, *args, **kwargs):
+        if not args and not kwargs:
             return len(self)
         else:
-            return len(Dict(self).keep(args[0]))
+            return len(Dict(self).keep(*args, **kwargs))
 
     def do(self, function, *args, **kwargs):
         self.last_value = function(self, *args, **kwargs)
@@ -488,18 +509,15 @@ class Dict(dict):
     def copy(self):
         return Dict(self)
 
-    def invoke(self, f, *args, **kwargs):
-        return self.map(lambda x, y: getattr(y, f)(*args, **kwargs))
-
     @classmethod
     def fromkeys(cls, *args, **kwargs):
         return Dict(dict.fromkeys(*args, **kwargs))
 
-    def empty(self, *args):
-        if not args:
+    def empty(self, *args, **kwargs):
+        if not args and not kwargs:
             return len(self) == 0
         else:
-            return len(Dict(self).rem(args[0])) == 0
+            return len(Dict(self).rem(*args, **kwargs)) == 0
 
 
 List(['update', 'clear']).map(Dict._proxy)
@@ -514,19 +532,18 @@ class DictTest(unittest.TestCase):
         self.assertEqual(self.seq, dict(a=1, b=2, c=3))
 
     def test_map(self):
-        self.assertEqual(self.seq.map(3), dict(a=3, b=3, c=3))
-        self.assertEqual(self.seq.map(lambda x, y: x),
+        self.assertEqual(self.seq.map(lambda x, y: (x, x)),
                          dict(a='a', b='b', c='c'))
 
-        self.assertEqual(self.seq.map(lambda x, y: y * 2),
+        self.assertEqual(self.seq.map(lambda x, y: (x, y * 2)),
                          dict(a=2, b=4, c=6))
 
     def test_keep(self):
-        self.assertEqual(self.seq.keep(3), dict(c=3))
+        self.assertEqual(self.seq.keep(eq=3), dict(c=3))
         self.assertEqual(self.seq.keep(lambda x, y: y > 2), dict(c=3))
 
     def test_rem(self):
-        self.assertEqual(self.seq.rem(3), dict(a=1, b=2))
+        self.assertEqual(self.seq.rem(eq=3), dict(a=1, b=2))
         self.assertEqual(self.seq.rem(lambda x, y: y > 2), dict(a=1, b=2))
 
     def test_update(self):
@@ -548,30 +565,21 @@ class DictTest(unittest.TestCase):
     def test_fromkeys(self):
         self.assertTrue(isinstance(Dict.fromkeys([1, 2, 3]), Dict))
         self.assertEqual(Dict.fromkeys([1, 2, 3]),
-                         {1:None, 2:None, 3:None})
-
-    def test_compact(self):
-        self.assertEqual(self.seq.update(a=None, b=[]).compact(),
-                         dict(c=3))
-
-        self.assertEqual(self.seq
-                           .update(a=None, b=[])
-                           .compact(lambda x, y: y == None),
-                         dict(b=[], c=3))
+                         {1: None, 2: None, 3: None})
 
     def test_all(self):
         self.assertTrue(self.seq.all(lambda x, y: y in [1, 2, 3]))
-        self.assertTrue(self.seq.update(a=2, c=2).all(2))
-        self.assertFalse(self.seq.all(4))
+        self.assertTrue(self.seq.update(a=2, c=2).all(eq=2))
+        self.assertFalse(self.seq.all(eq=4))
 
     def test_some(self):
+        self.assertTrue(self.seq.some(eq=2))
+        self.assertFalse(self.seq.some(eq=4))
         self.assertTrue(self.seq.some(lambda x, y: y == 3))
-        self.assertTrue(self.seq.some(2))
-        self.assertFalse(self.seq.some(4))
 
     def test_count(self):
         self.assertEqual(self.seq.count(), 3)
-        self.assertEqual(self.seq.count(3), 1)
+        self.assertEqual(self.seq.count(eq=3), 1)
         self.assertEqual(self.seq.count(lambda x, y: y in [1, 3]), 2)
 
     def test_empty(self):
@@ -586,21 +594,12 @@ class DictTest(unittest.TestCase):
     def test_do(self):
         self.assertEqual(
             (self.seq
-             .map(lambda x, y: y * 2)
-             .rem(4)
+             .map(lambda x, y: (x, y * 2))
+             .rem(eq=4)
              .do(self.assertEqual, dict(a=2, c=6))),
              dict(a=2, c=6))
 
         self.assertEqual(self.seq.do(lambda self: 1 + 1).last_value, 2)
-
-    def test_invoke(self):
-        (Dict(a='hello', b='hi')
-           .invoke('upper')
-           .do(self.assertEqual, dict(a='HELLO', b='HI')))
-
-        (Dict(a='hello', b='hi')
-           .invoke('find', 'h')
-           .do(self.assertEqual, dict(a=0, b=0)))
 
 
 
