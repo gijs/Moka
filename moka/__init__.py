@@ -1,4 +1,12 @@
 import unittest
+import string
+
+# todo
+# Make map(attr=sup)
+#        map(item=meh)
+
+class Blank:
+    pass
 
 
 class List(list):
@@ -31,6 +39,11 @@ class List(list):
     create -> Easy way to initialize a list.. List().create(20, rand)
     """
 
+    def __init__(self, *args, **kwargs):
+        self._moka_save = False
+        list.__init__(self, *args, **kwargs)
+
+
     @staticmethod
     def _proxy(method_name):
         def wrap(self, *args, **kwargs):
@@ -40,11 +53,36 @@ class List(list):
 
         setattr(List, method_name, wrap)
 
-    def _f(self, f, x):
-        if hasattr(f, '__call__'):
-            return f(x)
+    def _f(self, *args, **kwargs):
+        args = list(args)
+
+        if 'eq' in kwargs:
+            return lambda x: x == kwargs['eq']
+        elif 'in_' in kwargs:
+            return lambda x: x in kwargs['in_']
+        elif 'gt' in kwargs:
+            return lambda x: x > kwargs['gt']
+        elif 'ge' in kwargs:
+            return lambda x: x >= kwargs['ge']
+        elif 'lt' in kwargs:
+            return lambda x: x < kwargs['lt']
+        elif 'le' in kwargs:
+            return lambda x: x <= kwargs['le']
+
+        f = args.pop(0)
+
+        if Blank in args:
+            def tmp(x):
+                args[args.index(Blank)] = x
+                return f(*args, **kwargs)
+            return tmp
+
         else:
-            return f == x
+            return lambda x: f(x, *args, **kwargs)
+
+    def saving(self, save=True):
+        self._moka_save = save
+        return self
 
     def join(self, s):
         return s.join(self)
@@ -55,9 +93,15 @@ class List(list):
 
         return self.keep(f)
 
-    def map(self, f):
-        return List(f(x) if hasattr(f, '__call__') else f
-                    for x in self)
+    def _moka_assign(self, items):
+        if self._moka_save:
+            self[:] = items
+        else:
+            return List(items)
+
+    def map(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+        return self._moka_assign(f(x) for x in self)
 
     def do(self, function, *args, **kwargs):
         self.last_value = function(self, *args, **kwargs)
@@ -72,9 +116,9 @@ class List(list):
             for k in self:
                 d[f(k)] = k
 
-            return List(d.values())
+            return self._moka_assign(d.values())
 
-        return List(set(self))
+        return self._moka_assign(set(self))
 
     def invoke(self, name, *args, **kwargs):
         return self.map(lambda x: getattr(x, name)(*args, **kwargs))
@@ -91,26 +135,32 @@ class List(list):
         else:
             return len(List(self).rem(args[0])) == 0
 
-    def count(self, *args):
-        if not args:
+    def count(self, *args, **kwargs):
+        if not args and not kwargs:
             return len(self)
         else:
-            return len(List(self).keep(args[0]))
+            return len(List(self).keep(*args, **kwargs))
 
-    def find(self, f):
+    def find(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+
         for x in self:
-            if self._f(f, x):
+            if f(x):
                 return x
 
-    def keep(self, f):
-        return List(x for x in self if self._f(f, x))
+    def keep(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+        return self._moka_assign(x for x in self if f(x))
 
-    def rem(self, f):
-        return List(x for x in self if not self._f(f, x))
+    def rem(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+        return self._moka_assign(x for x in self if not f(x))
 
-    def some(self, f):
+    def some(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+
         for x in self:
-            if self._f(f, x):
+            if f(x):
                 return True
 
         return False
@@ -124,11 +174,13 @@ class List(list):
             except TypeError:
                 elements.append(el)
 
-        return elements
+        return self._moka_assign(elements)
 
-    def all(self, f):
+    def all(self, *args, **kwargs):
+        f = self._f(*args, **kwargs)
+
         for x in self:
-            if not self._f(f, x):
+            if not f(x):
                 return False
 
         return True
@@ -155,22 +207,20 @@ class ListTest(unittest.TestCase):
     def test_map(self):
         self.assertEqual(self.seq.map(lambda x: x * 2), [2, 4, 6, 8, 10])
 
-        self.assertEqual(self.seq.map(2), [2, 2, 2, 2, 2])
-
     def test_keep(self):
         self.assertEqual(self.seq.keep(lambda x: x < 3), [1, 2])
-        self.assertEqual(self.seq.keep(3), [3])
+        self.assertEqual(self.seq.keep(eq=3), [3])
 
     def test_rem(self):
         self.assertEqual(self.seq.rem(lambda x: x < 3), [3, 4, 5])
-        self.assertEqual(self.seq.rem(3), [1, 2, 4, 5])
+        self.assertEqual(self.seq.rem(eq=3), [1, 2, 4, 5])
 
     def test_mix(self):
         r = (self.seq
                  .map(lambda x: x * 2)
                  .rem(lambda x: x < 5)
                  .keep(lambda x: x % 2 == 0)
-                 .rem(6))
+                 .rem(eq=6))
 
         self.assertEqual(r, [8, 10])
 
@@ -180,7 +230,7 @@ class ListTest(unittest.TestCase):
              .map(lambda x: x * 2)
              .rem(lambda x: x < 5)
              .keep(lambda x: x % 2 == 0)
-             .rem(6)
+             .rem(eq=6)
              .do(self.assertEqual, [8, 10])),
              [8, 10])
 
@@ -192,18 +242,18 @@ class ListTest(unittest.TestCase):
     def test_some(self):
         self.assert_(self.seq.some(lambda x: x < 3))
 
-        self.assert_(self.seq.some(4))
+        self.assert_(self.seq.some(eq=4))
 
-        self.assertFalse(List([1, 1, 1]).some(2))
+        self.assertFalse(List([1, 1, 1]).some(eq=2))
 
         self.assertFalse(self.seq.some(lambda x: x < 1))
 
     def test_has(self):
-        self.assert_(List(range(10)).has(5))
+        self.assert_(List(range(10)).has(eq=5))
         self.assert_(List(range(10)).has(lambda x: x in [1, 2]))
 
     def test_find(self):
-        self.assertEqual(self.seq.find(3), 3)
+        self.assertEqual(self.seq.find(eq=3), 3)
 
         self.assertEqual(self.seq.find(lambda x: x == 3), 3)
 
@@ -212,9 +262,9 @@ class ListTest(unittest.TestCase):
     def test_all(self):
         self.assertFalse(self.seq.all(lambda x: x < 3))
 
-        self.assertFalse(self.seq.all(4))
+        self.assertFalse(self.seq.all(eq=4))
 
-        self.assert_(List([1, 1, 1]).all(1))
+        self.assert_(List([1, 1, 1]).all(eq=1))
 
         self.assert_(self.seq.all(lambda x: x < 10))
 
@@ -251,7 +301,7 @@ class ListTest(unittest.TestCase):
 
     def test_count(self):
         self.assertEqual(self.seq.count(), 5)
-        self.assertEqual(self.seq.count(3), 1)
+        self.assertEqual(self.seq.count(eq=3), 1)
         self.assertEqual(self.seq.count(lambda x: x in [1, 3]), 2)
 
     def test_empty(self):
@@ -299,6 +349,46 @@ class ListTest(unittest.TestCase):
     def test_flatten(self):
         self.assertEqual(List([1, List([2, 3, 6, [7, [8]]])]).flatten(),
                          [1, 2, 3, 6, 7, 8])
+
+    def test_partial(self):
+        (List('7')
+          .map(string.zfill, 3)
+          .do(self.assertEqual, ['007']))
+
+    def test_partial_blank(self):
+        (List([3])
+          .map(string.zfill, '7', Blank)
+          .do(self.assertEqual, ['007']))
+
+    def test_kw_in(self):
+        (List([1, 2])
+          .keep(in_=[2, 3, 4])
+          .do(self.assertEqual, [2]))
+
+    def test_kw_gt(self):
+        (List([1, 2])
+          .keep(gt=1)
+          .do(self.assertEqual, [2]))
+
+    def test_kw_ge(self):
+        (List([1, 2])
+          .keep(ge=1)
+          .do(self.assertEqual, [1, 2]))
+
+    def test_kw_lt(self):
+        (List([1, 2])
+          .keep(lt=2)
+          .do(self.assertEqual, [1]))
+
+    def test_kw_le(self):
+        (List([1, 2])
+          .keep(le=2)
+          .do(self.assertEqual, [1, 2]))
+
+    def test_savelist(self):
+        x = List(range(1, 5)).saving()
+        x.keep(eq=2)
+        self.assertEqual(x, [2])
 
 
 class Dict(dict):
@@ -372,14 +462,14 @@ class Dict(dict):
             return self.rem(lambda x, y: not y)
 
     def all(self, f):
-        for x,y in self.iteritems():
+        for x, y in self.iteritems():
             if not self._f(f, x, y):
                 return False
 
         return True
 
     def some(self, f):
-        for x,y in self.iteritems():
+        for x, y in self.iteritems():
             if self._f(f, x, y):
                 return True
 
@@ -511,6 +601,7 @@ class DictTest(unittest.TestCase):
         (Dict(a='hello', b='hi')
            .invoke('find', 'h')
            .do(self.assertEqual, dict(a=0, b=0)))
+
 
 
 if __name__ == '__main__':
